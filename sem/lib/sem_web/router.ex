@@ -16,7 +16,7 @@ defmodule SemWeb.Router do
   scope "/", SemWeb do
     pipe_through :browser
 
-    get "/", PageController, :index
+    resources "/", CallController
   end
 
   # Other scopes may use custom stacks.

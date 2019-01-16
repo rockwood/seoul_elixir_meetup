@@ -3,6 +3,7 @@ defmodule SemWeb.UserSocket do
 
   ## Channels
   # channel "room:*", SemWeb.RoomChannel
+  channel "call", SemWeb.CallChannel
 
   # Socket params are passed from the client and can
   # be used to verify and authenticate a user. After
