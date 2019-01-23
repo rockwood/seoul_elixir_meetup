@@ -22,7 +22,7 @@ import socket from "./socket";
 let channel = socket.channel("call", {});
 
 channel.join()
-  .receive("ok", () => { console.log("Joined successfully 2") })
+  .receive("ok", () => { console.log("Joined call channel successfully") })
   .receive("error", () => { console.log("Unable to join") })
 
 let localStream, peerConnection;
