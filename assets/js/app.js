@@ -4,128 +4,167 @@ import "webrtc-adapter";
 
 import socket from "./socket";
 
-let channel = socket.channel("call", {});
-
-channel.join()
-  .receive("ok", () => { console.log("Joined call channel successfully") })
-  .receive("error", () => { console.log("Unable to join") })
-
-let localStream, peerConnection;
 let localVideo = document.getElementById('localVideo');
 let remoteVideo = document.getElementById('remoteVideo');
 let connectButton = document.getElementById("connect");
-let callButton = document.getElementById("call");
-let hangupButton = document.getElementById("hangup");
+let disconnectButton = document.getElementById("disconnect");
 
-hangupButton.disabled = true;
-callButton.disabled = true;
-connectButton.onclick = connect;
-callButton.onclick = call;
-hangupButton.onclick = hangup;
+let channel = socket.channel("call", {});
 
-function connect() {
-  console.log("Requesting local stream");
-  navigator.getUserMedia({video:true}, gotStreamVideo, error => {
-          console.log("getUserMedia error: ", error);
-              });
-  navigator.getUserMedia({audio:true, video:true}, gotStreamAudioVideo, error => {
-          console.log("getUserMedia error: ", error);
-              });
-}
-
-function gotStreamVideo(stream) {
-  console.log("Received local video stream");
-  localVideo.srcObject = stream;
-}
-
-function gotStreamAudioVideo(stream) {
-  console.log("Received local Audio/Video stream");
-  localStream = stream;
-  setupPeerConnection();
-}
-
-function setupPeerConnection() {
-  connectButton.disabled = true;
-  callButton.disabled = false;
-  hangupButton.disabled = false;
-  console.log("Waiting for call");
-
-  let servers = {
-    'iceServers': [{
-      'url': 'stun:stun.example.org'
-    }]
-  };
-
-  peerConnection = new RTCPeerConnection(servers);
-  console.log("Created local peer connection");
-  peerConnection.onicecandidate = gotLocalIceCandidate;
-  peerConnection.onaddstream = gotRemoteStream;
-  peerConnection.addStream(localStream);
-  console.log("Added localStream to localPeerConnection");
-}
-
-function call() {
-  callButton.disabled = true;
-  console.log("Starting call");
-  peerConnection.createOffer(gotLocalDescription, handleError);
-}
-
-function gotLocalDescription(description){
-  peerConnection.setLocalDescription(description, () => {
-      channel.push("message", { body: JSON.stringify({
-              'sdp': peerConnection.localDescription
-              })});
-        }, handleError);
-  console.log("Offer from localPeerConnection: \n" + description.sdp);
-}
-
-function gotRemoteDescription(description){
-  console.log("Answer from remotePeerConnection: \n" + description.sdp);
-  peerConnection.setRemoteDescription(new RTCSessionDescription(description.sdp));
-  peerConnection.createAnswer(gotLocalDescription, handleError);
-}
-
-function gotRemoteStream(event) {
-  remoteVideo.srcObject = event.stream;
-  console.log("Received remote stream");
-}
-
-function gotLocalIceCandidate(event) {
-  if (event.candidate) {
-    console.log("Local ICE candidate: \n" + event.candidate.candidate);
-    channel.push("message", {body: JSON.stringify({
-          'candidate': event.candidate
-          })});
-  }
-}
-
-function gotRemoteIceCandidate(event) {
-  callButton.disabled = true;
-  if (event.candidate) {
-    peerConnection.addIceCandidate(new RTCIceCandidate(event.candidate));
-    console.log("Remote ICE candidate: \n " + event.candidate.candidate);
-  }
-}
-
-function hangup() {
-  console.log("Ending call");
-  peerConnection.close();
-  localVideo.src = null;
-  peerConnection = null;
-  hangupButton.disabled = true;
-  connectButton.disabled = false;
-  callButton.disabled = true;
-}
-
-function handleError(error) {
-  console.log(error.name + ': ' + error.message);
-}
+channel.join()
+  .receive("ok", () => console.log("Joined call channel successfully"))
+  .receive("error", () => console.log("Unable to join"));
 
 channel.on("message", payload => {
   let message = JSON.parse(payload.body);
-  if (message.sdp) {
-    gotRemoteDescription(message);
-  } else {
-    gotRemoteIceCandidate(message);
+
+  console.log("MESSAGE RECEIVED", message);
+
+  switch(message.type) {
+  case "new-ice-candidate":
+    handleNewICECandidateMsg(message);
+    break;
+
+  case "video-offer":
+    handleVideoOfferMsg(message);
+    break;
+
+  case "video-answer":
+    handleVideoAnswerMsg(message);
+    break;
   }
-})
+});
+
+let peerConnection = new RTCPeerConnection({
+  iceServers: [{
+    'url': 'stun:stun.example.org'
+  }]
+});
+
+peerConnection.onicecandidate = handleICECandidateEvent;
+peerConnection.ontrack = handleAddTrackEvent;
+peerConnection.onremovetrack = handleRemoveTrackEvent;
+peerConnection.onnegotiationneeded = handleNegotiationNeededEvent;
+peerConnection.oniceconnectionstatechange = handleICEConnectionStateChangeEvent;
+peerConnection.onsignalingstatechange = handleSignalingStateChangeEvent;
+
+connectButton.onclick = connect;
+disconnectButton.onclick = disconnect;
+
+function broadcast(message) {
+  console.log("MESSAGE SENT", message);
+
+  channel.push("message", { body: JSON.stringify(message) });
+}
+
+function connect() {
+  console.log("Requesting local stream");
+
+  navigator.mediaDevices
+    .getUserMedia({ video: true })
+    .then((localStream) => {
+      localVideo.srcObject = localStream;
+      localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+    })
+    .then(() => {
+      connectButton.disabled = true;
+      disconnectButton.disabled = false;
+    })
+    .catch(handleError);
+}
+
+function disconnect() {
+  closeVideoCall();
+  broadcast({ type: "disconnect" });
+}
+
+function closeVideoCall() {
+  remoteVideo.removeAttribute("src");
+  remoteVideo.removeAttribute("srcObject");
+  localVideo.removeAttribute("src");
+  remoteVideo.removeAttribute("srcObject");
+
+  connectButton.disabled = false;
+  disconnectButton.disabled = true;
+}
+
+function handleICECandidateEvent(event) {
+  if (event.candidate) {
+    broadcast({ type: "new-ice-candidate", candidate: event.candidate });
+  }
+}
+
+function handleNegotiationNeededEvent() {
+  peerConnection
+    .createOffer()
+    .then((offer) => peerConnection.setLocalDescription(offer))
+    .then(() => broadcast({ type: "video-offer", sdp: peerConnection.localDescription }))
+    .catch(handleError);
+}
+
+function handleAddTrackEvent(event) {
+  remoteVideo.srcObject = event.streams[0];
+}
+
+function handleRemoveTrackEvent(event) {
+  var stream = remoteVideo.srcObject;
+  var trackList = stream.getTracks();
+
+  if (trackList.length == 0) {
+    closeVideoCall();
+  }
+}
+
+function handleICEConnectionStateChangeEvent(event) {
+  switch(peerConnection.iceConnectionState) {
+    case "closed":
+    case "failed":
+    case "disconnected":
+      closeVideoCall();
+      break;
+  }
+}
+
+function handleSignalingStateChangeEvent(event) {
+  switch(peerConnection.signalingState) {
+    case "closed":
+      closeVideoCall();
+      break;
+  }
+};
+
+function handleVideoOfferMsg(msg) {
+  peerConnection
+    .setRemoteDescription(new RTCSessionDescription(msg.sdp))
+    .then(() => navigator.mediaDevices.getUserMedia({ audio: true, video: true }))
+    .then((remoteStream) => {
+      remoteVideo.srcObject = remoteStream;
+    })
+    .then(() => peerConnection.createAnswer())
+    .then((answer) => peerConnection.setLocalDescription(answer))
+    .then(() => broadcast({ type: "video-answer", sdp: peerConnection.localDescription}))
+    .catch(handleError);
+}
+
+function handleNewICECandidateMsg(msg) {
+  var candidate = new RTCIceCandidate(msg.candidate);
+
+  console.log("Adding received ICE candidate: " + JSON.stringify(candidate));
+
+  peerConnection
+    .addIceCandidate(candidate)
+    .catch(handleError);
+}
+
+function handleVideoAnswerMsg(msg) {
+  console.log("Call recipient has accepted our call");
+
+  var desc = new RTCSessionDescription(msg.sdp);
+  peerConnection
+    .setRemoteDescription(desc)
+    .catch(handleError);
+}
+
+function handleError(...args) {
+  console.error(...args);
+}
