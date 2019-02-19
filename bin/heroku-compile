@@ -1,0 +1,5 @@
+npm run deploy
+
+cd $phoenix_dir
+
+mix do phx.digest, ecto.migrate
