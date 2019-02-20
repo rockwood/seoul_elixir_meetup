@@ -1,6 +1,14 @@
 import "../css/app.css";
+import "quill/dist/quill.bubble.css";
+import "quill/dist/quill.snow.css";
 import "phoenix_html";
 import "webrtc-adapter";
+import Quill from "quill";
+
+var quill = new Quill('#editor', {
+  modules: { toolbar: true },
+  theme: 'snow'
+});
 
 import socket from "./socket";
 
@@ -14,6 +22,21 @@ let channel = socket.channel("call", {});
 channel.join()
   .receive("ok", () => console.log("Joined call channel successfully"))
   .receive("error", () => console.log("Unable to join"));
+
+
+quill.on('text-change', (delta, oldDelta, source) => {
+  if (source == 'api') {
+    console.log("An API call triggered this change.");
+  } else if (source == 'user') {
+    channel.push("text-changed", { delta: JSON.stringify(delta) });
+  }
+});
+
+channel.on("new-delta", payload => {
+  let delta = JSON.parse(payload.delta);
+
+  quill.updateContents(delta.ops, 'api');
+});
 
 channel.on("message", payload => {
   let message = JSON.parse(payload.body);

@@ -9,4 +9,9 @@ defmodule SemWeb.CallChannel do
     broadcast! socket, "message", %{body: body}
     {:noreply, socket}
   end
+
+  def handle_in("text-changed", %{"delta" => delta}, socket) do
+    broadcast! socket, "new-delta", %{delta: delta}
+    {:noreply, socket}
+  end
 end

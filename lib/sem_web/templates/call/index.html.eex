@@ -12,3 +12,5 @@
   <button id="connect">Connect</button>
   <button id="disconnect" disabled="true">Disconnect</button>
 </div>
+
+<div id="editor">
